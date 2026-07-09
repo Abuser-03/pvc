@@ -1,0 +1,21 @@
+[package]
+name = "ecg"
+version = "0.1.0"
+edition = "2021"
+
+# Ядро (lib) — это #![no_std], целочисленное, без аллокаций (см. src/lib.rs).
+# Бинарь (main) — обычный std-хост для разработки и валидации.
+[lib]
+name = "ecg"
+path = "src/lib.rs"
+
+[[bin]]
+name = "ecg"
+path = "src/main.rs"
+
+# Настройки под будущий перенос на МК: оптимизация по размеру + LTO.
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
