@@ -1,4 +1,4 @@
-[workspace]
+git checkout -b stm32-firmware    [workspace]
 resolver = "2"
 members = ["ecg-core", "ecg-fw"]
 default-members = ["ecg-fw"]
