@@ -1,0 +1,15 @@
+[workspace]
+resolver = "2"
+members = ["ecg-core", "ecg-fw"]
+default-members = ["ecg-fw"]
+
+# Профили держим в корне воркспейса (cargo требует именно тут).
+[profile.release]
+opt-level = "z"      # оптимизация по размеру — важно для МК
+lto = true
+codegen-units = 1
+panic = "abort"      # на bare-metal разворачивать стек некому
+debug = true         # символы для cargo size / отладки (во flash не грузятся)
+
+[profile.dev]
+panic = "abort"

@@ -1,0 +1,21 @@
+[package]
+name = "ecg-fw"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+ecg = { path = "../ecg-core" }
+cortex-m = "0.7.7"
+cortex-m-rt = "0.7.5"
+panic-halt = "1.0"
+embedded-hal = "1.0"
+
+[dependencies.stm32f4xx-hal]
+version = "0.23"
+features = ["stm32f407"]                # <-- камень задаётся ЗДЕСЬ (см. README)
+
+[features]
+default = ["test-data"]
+# Источник отсчётов ЭКГ выбирается на этапе компиляции:
+test-data = []   # зашитая запись .v1 из src/ecg_data.rs (для Renode / без железа)
+adc        = []  # реальный сигнал с АЦП + таймер 250 Гц (только на живой плате)

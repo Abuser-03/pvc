@@ -1,0 +1,10 @@
+# Все сборки в этом воркспейсе идут под Cortex-M4F (STM32F407 = thumbv7em-none-eabihf).
+# Под другой камень см. README (раздел "Сборка под другую STM32").
+
+[build]
+target = "thumbv7em-none-eabihf"
+
+[target.thumbv7em-none-eabihf]
+rustflags = ["-C", "link-arg=-Tlink.x"]  # link.x даёт cortex-m-rt, он подтягивает memory.x
+# На реальном железе можно включить раннер (тогда `cargo run` зальёт прошивку через ST-Link):
+# runner = "probe-rs run --chip STM32F407VGTx"

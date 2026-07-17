@@ -1,0 +1,21 @@
+:name: ECG arrhythmia detector on STM32F4 Discovery
+:description: гоняет прошивку детектора аритмий на эмулированном Cortex-M4
+
+# Путь к ELF (собери: cargo build --release --features test-data)
+$bin ?= @target/thumbv7em-none-eabihf/release/ecg-fw
+
+# Плата F407 Discovery — модель есть в Renode из коробки.
+mach create "ecg"
+machine LoadPlatformDescription @platforms/boards/stm32f4_discovery-kit.repl
+
+# Окно с логами: наш вывод идёт в USART2.
+showAnalyzer sysbus.usart2
+
+# Перезагрузка перезаливает ELF (удобно при итерациях).
+macro reset
+"""
+    sysbus LoadELF $bin
+"""
+runMacro $reset
+
+# start   # раскомментируй для автозапуска, либо набери `start` в мониторе Renode

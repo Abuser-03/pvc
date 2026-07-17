@@ -1,0 +1,3 @@
+cargo:rustc-link-search=/Users/kornic/Downloads/ecg-stm32/target/thumbv7em-none-eabihf/debug/build/ecg-fw-7fef783ca91344a0/out
+cargo:rerun-if-changed=memory.x
+cargo:rerun-if-changed=build.rs

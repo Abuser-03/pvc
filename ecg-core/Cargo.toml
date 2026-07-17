@@ -1,0 +1,9 @@
+[package]
+name = "ecg"
+version = "0.1.0"
+edition = "2021"
+
+# Это то самое no_std-ядро без внешних зависимостей.
+# Прошивка (ecg-fw) зависит от него по пути.
+[lib]
+path = "src/lib.rs"
