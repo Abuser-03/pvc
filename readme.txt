@@ -6,5 +6,19 @@ mf1_II - мультифокусная PVC
 bigem_II - бигеминия
 run5 - пробежка 5 PVC
 
+real_1, real_2 - здоровый человек
+
+st08mf_II - Fluke, многофокусная PVC на сигнале с высоким ST
+
+st_08mf_II - Fluke, многофокусная PVC на сигнале с низким ST
+
+t100_II, t150_II - Fluke, высокий зубец T
+
+trig_II - Fluke, тригеминия
+
+vfib - Fluke, фибриллиция желудочков
+
+vtach_II - Fluke, желудочковая тахикардия
+
 Для зависимостей 
 pip install numpy matplotlib
