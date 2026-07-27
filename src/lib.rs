@@ -21,6 +21,11 @@ const LEARN_SAMPLES: u32 = 500; // фаза обучения порогов ~2 �
 const BRADY_RR: i32 = 250; // RR > 1000 мс  => ЧСС < 60  => брадикардия
 const TACHY_RR: i32 = 150; // RR <  600 мс  => ЧСС > 100 => тахикардия
 
+// Сколько последних RR держим для опорного значения. Опорный RR берём как
+// МЕДИАНУ этой истории, а не скользящее среднее: при тригеминии треть
+// интервалов короткие, и среднее уползает за ними, а медиана — нет.
+const RR_HIST: usize = 8;
+
 // Преждевременность: удар считаем PVC, если RR < PVC_PCT% от опорного RR. Нейронка от нее краевая задача
 const PVC_PCT: i32 = 85;
 
@@ -157,6 +162,7 @@ struct QrsDetector {
 
     last_qrs_n: u32,   // индекс последнего принятого R
     last_qrs_peak: i32, // амплитуда MWI последнего R (для T-волны)
+    last_r: u32,        // индекс ПОСЛЕДНЕГО ВЫДАННОГО R (не пика MWI)
     have_qrs: bool,
     rr_avg: i32, // среднее RR (все принятые беты) — для поиска-назад
 
@@ -182,12 +188,26 @@ impl QrsDetector {
             learn_sum: 0,
             last_qrs_n: 0,
             last_qrs_peak: 0,
+            last_r: 0,
             have_qrs: false,
             rr_avg: 0,
             sb_peak_val: 0,
             sb_peak_n: 0,
             sb_r_index: 0,
         }
+    }
+
+    /// Выдать удар, только если найденный R достаточно далеко от предыдущего R.
+    /// Закрывает сразу две дыры:
+    ///   * два разных пика интегратора могут указать на ОДИН И ТОТ ЖЕ R
+    ///     (окно поиска R шире рефрактерного периода) — был двойной счёт;
+    ///   * ветка поиска-назад раньше выдавала удар вообще без проверки
+    ///     рефрактерности — отсюда брались интервалы по 44 мс.
+    fn emit(&mut self, peak_val: i32, peak_n: u32, r: u32) -> Option<u32> {
+        if self.have_qrs && (r <= self.last_r || r - self.last_r < REFRACTORY) {
+            return None;
+        }
+        Some(self.accept(peak_val, peak_n, r))
     }
 
     /// Принять пик как QRS: обновить пороги/RR, вернуть индекс R.
@@ -206,6 +226,7 @@ impl QrsDetector {
         }
         self.last_qrs_n = peak_n;
         self.last_qrs_peak = peak_val;
+        self.last_r = r_index;
         self.have_qrs = true;
         self.sb_peak_val = 0; // сбрасываем кандидата поиска-назад
         r_index
@@ -296,7 +317,9 @@ impl QrsDetector {
                 } else if peak_val > thr1 {
                     //  QRS принят сразу
                     let r = self.locate_r();
-                    return Some(self.accept(peak_val, peak_n, r));
+                    if let Some(r) = self.emit(peak_val, peak_n, r) {
+                        return Some(r);
+                    }
                 } else {
                     // ниже основного порога: подкручиваем оценку шума,
                     // но если пик выше половинного порога — запоминаем как
@@ -316,7 +339,11 @@ impl QrsDetector {
         if self.have_qrs && self.rr_avg > 0 {
             let missed = self.rr_avg + (self.rr_avg >> 1) + (self.rr_avg >> 3); // ~1.625*rr_avg
             if self.n.wrapping_sub(self.last_qrs_n) > missed as u32 && self.sb_peak_val > 0 {
-                return Some(self.accept(self.sb_peak_val, self.sb_peak_n, self.sb_r_index));
+                let (v, pn, ri) = (self.sb_peak_val, self.sb_peak_n, self.sb_r_index);
+                self.sb_peak_val = 0; // кандидат израсходован в любом случае
+                if let Some(r) = self.emit(v, pn, ri) {
+                    return Some(r);
+                }
             }
         }
 
@@ -366,7 +393,10 @@ pub struct BeatReport {
 struct Classifier {
     have_prev: bool,
     prev_r: u32,
-    rr_ref: i32, // опорный RR "нормального" ритма (EMA по нормальным ударам)
+    rr_ref: i32, // опорный RR "нормального" ритма (медиана истории RR)
+    rr_hist: [i32; RR_HIST], // последние RR (порядок не важен — берём медиану)
+    rr_cnt: usize,           // сколько ячеек уже заполнено (насыщается)
+    rr_pos: usize,           // куда писать следующий
 
     // бигеминия: считаем строгое чередование ТИПОВ ударов (норма/PVC)
     have_prev_kind: bool,
@@ -384,6 +414,9 @@ impl Classifier {
             have_prev: false,
             prev_r: 0,
             rr_ref: 0,
+            rr_hist: [0; RR_HIST],
+            rr_cnt: 0,
+            rr_pos: 0,
             have_prev_kind: false,
             prev_kind: BeatKind::Normal,
             kind_alt: 0,
@@ -391,6 +424,45 @@ impl Classifier {
             pvc_run: 0,
             rate_state: 0,
         }
+    }
+
+    /// Записать очередной RR в кольцевую историю.
+    fn rr_push(&mut self, rr: i32) {
+        self.rr_hist[self.rr_pos] = rr;
+        self.rr_pos += 1;
+        if self.rr_pos >= RR_HIST {
+            self.rr_pos = 0;
+        }
+        if self.rr_cnt < RR_HIST {
+            self.rr_cnt += 1;
+        }
+    }
+
+    /// Медиана истории RR. Сортировка вставками по копии на стеке:
+    /// не больше 8 элементов, без кучи и без деления.
+    fn rr_median(&self) -> i32 {
+        let n = self.rr_cnt;
+        if n == 0 {
+            return 0;
+        }
+        let mut tmp = [0i32; RR_HIST];
+        let mut i = 0;
+        while i < n {
+            tmp[i] = self.rr_hist[i];
+            i += 1;
+        }
+        let mut i = 1;
+        while i < n {
+            let v = tmp[i];
+            let mut j = i;
+            while j > 0 && tmp[j - 1] > v {
+                tmp[j] = tmp[j - 1];
+                j -= 1;
+            }
+            tmp[j] = v;
+            i += 1;
+        }
+        tmp[n / 2]
     }
 
     fn on_beat(&mut self, r: u32) -> BeatReport {
@@ -414,19 +486,18 @@ impl Classifier {
             self.rr_ref = rr; // затравка
         }
 
-        //  метка удара по преждевременности
+        //  метка удара по преждевременности (сравниваем с опорным ДО учёта
+        //  текущего интервала, иначе экстрасистола сама себя оправдает)
         let premature = rr * 100 < self.rr_ref * PVC_PCT;
         let kind = if premature { BeatKind::Pvc } else { BeatKind::Normal };
 
-        // Опорный RR обновляем только нормальными ударами И только если RR
-        // в разумной полосе вокруг текущего (0.75..1.25). Иначе пропущенный
-        // удар (RR ~= 2x) утащил бы опорный вверх и всё залипло бы.
-        if kind == BeatKind::Normal {
-            let band = self.rr_ref >> 2;
-            if rr >= self.rr_ref - band && rr <= self.rr_ref + band {
-                self.rr_ref += (rr - self.rr_ref) >> 3;
-            }
-        }
+        // Опорный RR = медиана последних RR_HIST интервалов. В историю кладём
+        // ВСЕ интервалы, включая экстрасистолические: медиана к ним устойчива,
+        // пока их меньше половины. Прежний вариант (скользящее среднее только
+        // по "нормальным" в полосе 0.75..1.25) при тригеминии затравливался
+        // коротким интервалом и залипал — экстрасистолы переставали находиться.
+        self.rr_push(rr);
+        self.rr_ref = self.rr_median();
 
         //  бигеминия: строгое чередование норма-PVC-норма-PVC по типам
         if !self.have_prev_kind {
