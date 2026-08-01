@@ -90,6 +90,8 @@ fn main() {
         hr_vals.iter().sum::<u32>() / hr_vals.len() as u32
     };
 
+    let (art, tw) = ana.quality();
+    println!("отбраковано   : {art} артефактов, {tw} зубцов T");
     println!("-*10 итог -*15");
     println!("ударов найдено : {total}");
     println!("  норма        : {normal}");
@@ -107,6 +109,8 @@ fn main() {
             let name = match b.rhythm.unwrap() {
                 RhythmKind::Bradycardia => "брадикардия",
                 RhythmKind::Tachycardia => "тахикардия",
+                RhythmKind::VentricularTachycardia => "!! ЖЕЛУДОЧКОВАЯ ТАХИКАРДИЯ",
+                RhythmKind::Fibrillation => "!!! ФИБРИЛЛЯЦИЯ ЖЕЛУДОЧКОВ",
                 RhythmKind::Bigeminy => "бигеминия",
                 RhythmKind::Couplet => "куплет (2 PVC)",
                 RhythmKind::Run => "пробежка ЖТ (>=3 PVC)",
@@ -129,7 +133,11 @@ fn main() {
                 let idx = b.sample as usize;
                 if idx < n {
                     let k = if b.kind == BeatKind::Pvc { 1 } else { 0 };
-                    let _ = writeln!(f, "{}, {}, {}", xs[idx], ys[idx], k);
+                    let _ = writeln!(
+                        f,
+                        "{}, {}, {}, {}, {}",
+                        xs[idx], ys[idx], k, b.width_samples, b.slope
+                    );
                 }
             }
             println!("\nмаркеры записаны: {markers_path}");
